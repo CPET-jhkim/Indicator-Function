@@ -1,6 +1,8 @@
 import numpy as np
 from math import log2
 from .print import debug_print
+from polyEval.algorithm import cal_polyEval
+from polyEval.error_bound import cal_bound, ErrBound
 
 ''' 기타 필요한 함수들 '''
 # 다항함수 평가
@@ -306,27 +308,29 @@ def decide_exit(errors: list, threshold: float, print_mode: str) -> bool:
 # remez 다음을 위한 interval, max_err 계산
 # mode1 : errbound계산에 B_clean 고려
 # mode2 : errbound계산에 B_scale만 고려
-def calculate_next_remez(coeff, evalF, eb, intervals, err_mode: int):
-    ni = []
-    max_err = 0
+def calculate_next_remez(coeff, evalF, eb, intervals, err_mode: int=2):
+    try:
+        ni = []
+        max_err = 0
 
-    for start, end in intervals:
-        if start == end:
-            val = evalF(start) - evalP(coeff, start)
-            err = eb.cal_bound(start, coeff, err_mode)/eb.scale
-            val1 = val + err
-            val2 = val - err
-            ni.append([val2, val1])
-            max_err = max(val1, max_err)
-        else:
-            points = generate_points(start, end)
-            # length = abs(end - start)
-            # # 적절한 간격으로 샘플링, 오차 계산
-            # num_points = int(np.clip(np.ceil(length / 1e-3), 50, 2000))
-            # points = np.linspace(start, end, num_points)
+        dcmp = cal_polyEval(coeff)
+        eb2 = ErrBound(eb.sigma, eb.N, eb.h, eb.s)
+        def calbound(x):
+            try:
+                bound = cal_bound(eb2, x, dcmp)
+                return float(bound/eb2.scale)
+            except Exception as e:
+                print(f"x: {x}, bound: {bound}, scale: {eb2.scale}")
+                return 0
             
-            p_vals1      = np.fromiter((evalP(coeff, p) + eb.cal_bound(p, coeff, err_mode)/eb.scale for p in points), dtype=float, count=points.size)
-            p_vals2      = np.fromiter((evalP(coeff, p) - eb.cal_bound(p, coeff, err_mode)/eb.scale for p in points), dtype=float, count=points.size)
+        for start, end in intervals:
+            if start == end:
+                points = np.array([start])
+            else:
+                points = generate_points(start, end)
+                
+            p_vals1      = np.fromiter((evalP(coeff, p) + calbound(p) for p in points), dtype=float, count=points.size)
+            p_vals2      = np.fromiter((evalP(coeff, p) - calbound(p) for p in points), dtype=float, count=points.size)
             f_vals      = np.fromiter((evalF(p) for p in points), dtype=float, count=points.size)
 
             err_vals = np.concatenate((np.abs(f_vals - p_vals1), np.abs(f_vals - p_vals2)))
@@ -335,15 +339,15 @@ def calculate_next_remez(coeff, evalF, eb, intervals, err_mode: int):
             
             # 최대오차
             max_err = max(np.max(err_vals), max_err)
-    
-    # 정렬 - 구간이 긴 쪽이 다음 근사에서 0으로 수렴해야함
-    if (ni[0][1]-ni[0][0]) < (ni[1][1]-ni[1][0]):
-        ni.reverse()
+        
+        # 정렬 - 구간이 긴 쪽이 다음 근사에서 0으로 수렴해야함
+        if (ni[0][1]-ni[0][0]) < (ni[1][1]-ni[1][0]):
+            ni.reverse()
 
-    # if ni[0][0] > ni[1][0]:
-    #     ni.reverse()
-
-    return max_err, ni
+        return max_err, ni
+    except Exception as e:
+        print(e)
+        return -99, [[0, 1], [1, 0]]
 
 
 

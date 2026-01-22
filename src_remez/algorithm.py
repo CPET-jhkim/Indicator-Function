@@ -10,7 +10,8 @@ from src_errbound.error_bound import EB
 
 # remez1 - errbound 계산에 초기 B_clean을 고려함
 # remez2 - errbound 계산에 B_scale만을 고려함
-def remez_algorithm(n: int, intervals: list, evalF, approx_mode: str, eb: EB, err_mode: int, print_mode: str) -> tuple:  
+def remez_algorithm(n: int, intervals: list, evalF, approx_mode: str, eb: EB, err_mode: int=2, print_mode: str="normal", clni: bool=True) -> tuple | list:  
+    err_return = ([-1], 99, []) if clni else [-1]
     intervals = slice_interval(approx_mode, intervals)
 
     # 1: x 샘플링
@@ -37,13 +38,15 @@ def remez_algorithm(n: int, intervals: list, evalF, approx_mode: str, eb: EB, er
         except Exception as e:
             # print("행렬식 연산 오류")
             # print(e)
-            return [-1], 99, []
+            return err_return
         try:
             coeff, E = solve_matrix(A_matrix, y_matrix, n, powers)
+            if coeff == [-1]:
+                pass
         except Exception as e:
             # print("??")
             # print(e)
-            return [-1], 99, []
+            return err_return
 
         # 4: 지역 극값 연산
         max_point_x, max_point_y = calculate_local_max(coeff, evalF, intervals)
@@ -79,7 +82,7 @@ def remez_algorithm(n: int, intervals: list, evalF, approx_mode: str, eb: EB, er
                 debug_print(f"Fatal Error\t\t: {req_points-added} more points need to be added.", print_mode)
                 best_points_x = max_point_x
                 best_points_y = max_point_y
-                return [-1], 99, []
+                return err_return
             else:
                 max_point_x.sort()
                 max_point_y.sort()
@@ -96,25 +99,28 @@ def remez_algorithm(n: int, intervals: list, evalF, approx_mode: str, eb: EB, er
             except TypeError as e:
                 # print("극점 개수 오류")
                 # print(e)
-                return [-1], 99, []
+                return err_return
 
         best_error_abs = [abs(x) for x in best_points_y]
 
         # 5: 종료조건 판단
         if decide_exit(best_error_abs, 1e-2, print_mode):
             try:
-                max_err, next_intervals = calculate_next_remez(coeff, evalF, eb, intervals, err_mode)
-                if next_intervals[0][1] < next_intervals[1][0]:
-                    return coeff, max_err, next_intervals
+                if clni:
+                    max_err, next_intervals = calculate_next_remez(coeff, evalF, eb, intervals, err_mode)
+                    if next_intervals[0][1] < next_intervals[1][0]:
+                        return coeff, max_err, next_intervals
+                    else:
+                        debug_print("구간 대소관계 오류", print_mode)
+                        return err_return
                 else:
-                    debug_print("구간 대소관계 오류", print_mode)
-                    return [-1], 99, []
+                    return coeff
             
             except Exception as e:
                 print("구간 계산 오류")
                 print(intervals)
                 print(e)
-                return [-1], 99, []
+                return err_return
 
         else:
             x_samples = best_points_x
@@ -122,7 +128,7 @@ def remez_algorithm(n: int, intervals: list, evalF, approx_mode: str, eb: EB, er
         debug_print("", print_mode)
     
     debug_print("Approx failed.", print_mode)
-    return [-1], 99, []
+    return err_return
 
 
 def cleanse(eb: EB, intervals: list[list[float]]):

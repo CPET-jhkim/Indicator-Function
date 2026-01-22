@@ -2,6 +2,10 @@ from math import sqrt, pow, log2
 
 class EB:
     def __init__(self, sigma: float, N: int, h: int, s: int):
+        self.sigma = sigma
+        self.N = N
+        self.h = h
+        self.s = s
         self.Bc = B_clean(sigma, N, h)
         self.Bs = B_scale(N, h)
         self.scale = pow(2, s)
