@@ -1,105 +1,116 @@
 import numpy as np
 from .basic import *
-from .basic_multi import find_best_combination, find_best_combination_v2, find_best_combination_v3
+from .basic_multi import find_best_combination
 from .print import *
 from .print_plot import *
-from typing import Literal
-import sympy as sp
-from numpy.polynomial import polynomial as P
-from src_errbound.error_bound import EB
+from polyEval.error_bound import ErrBound
 
-# remez1 - errbound 계산에 초기 B_clean을 고려함
-# remez2 - errbound 계산에 B_scale만을 고려함
-def remez_algorithm(n: int, intervals: list, evalF, approx_mode: str, eb: EB, err_mode: int=2, print_mode: str="normal", clni: bool=True) -> tuple | list:  
+# remez algorithm
+def remez_algorithm(n: int | list, intervals: list, evalF, approx_mode: str | None, eb: ErrBound, print_mode: str="normal", clni: bool=True) -> tuple | list:  
     err_return = ([-1], 99, []) if clni else [-1]
-    intervals = slice_interval(approx_mode, intervals)
+    if len(intervals) == 0:
+        return err_return
 
-    # 1: x 샘플링
-    if approx_mode == "odd":
-        sample_number = int((n + 1) / 2) + 1
-    elif approx_mode == "even":
-        sample_number = int(n / 2 + 2)
-    elif approx_mode == "all":
-        sample_number = n + 2
+    if type(n) == int:           
+        # 1: approx_mode 기반 설정
+        if approx_mode in ["odd", "even"]:
+            powers = [i for i in range(n % 2, n + 1, 2)]
+        elif approx_mode == "all":
+            powers = [i for i in range(n+1)]    
+        sample_number = len(powers) + 1
+            
+    # list로 주어지는 경우 - 제외할 계수가 0인 binary list 형태.
+    elif type(n) == list:
+        # 예상되는 다항식이 짝수/홀수인지 확인하고 approx_mode 설정.
+        k = len(n)
+        flag_even = any(n[i] == 1 for i in range(0, k, 2))
+        flag_odd  = any(n[i] == 1 for i in range(1, k, 2))
+        if flag_even and not flag_odd:
+            approx_mode = "even"
+            # sample_number = int(k / 2 + 2)
+            # powers = [i for i in range(k % 2, k + 1, 2)]
+        elif flag_odd and not flag_even:
+            approx_mode = "odd"
+            # sample_number = int((k + 1) / 2) + 1
+            # powers = [i for i in range(k % 2, k + 1, 2)]
+        else:
+            approx_mode = "all"
+            
+        powers = [i for i, v in enumerate(n) if v == 1]
+        sample_number = len(powers) + 1
+        n = k - 1
+        
+    intervals = slice_interval(approx_mode, intervals)
     x_samples = sample_points_multi(sample_number, intervals, print_mode)
 
     for _ in range(50):
-        # 2: 행렬식 구성
-        if approx_mode == "even":
-            powers = [i for i in range(n % 2, n + 1, 2)]
-        elif approx_mode == "all":
-            powers = [i for i in range(n+1)]
         A_matrix, y_matrix = create_matrix(powers, x_samples, evalF)
 
         # 3: 행렬식 연산
-        try:
-            assert A_matrix.shape[0] == A_matrix.shape[1], \
-                    f"A가 직사각 행렬입니다. shape={A_matrix.shape[0]}, {A_matrix.shape[1]}"
-        except Exception as e:
-            # print("행렬식 연산 오류")
-            # print(e)
+        if A_matrix.shape[0] != A_matrix.shape[1]:
+            print(f"A가 직사각 행렬입니다. shape={A_matrix.shape[0]}, {A_matrix.shape[1]}")
             return err_return
+        
         try:
             coeff, E = solve_matrix(A_matrix, y_matrix, n, powers)
-            if coeff == [-1]:
-                pass
-        except Exception as e:
-            # print("??")
-            # print(e)
+        except np.linalg.LinAlgError:
+            # print("Singular Matrix!!")
             return err_return
 
         # 4: 지역 극값 연산
         max_point_x, max_point_y = calculate_local_max(coeff, evalF, intervals)
-
+        if -1 in max_point_y or 1 in max_point_y:
+            return err_return
+        
         if len(max_point_x) == sample_number:
             best_points_x = max_point_x
             best_points_y = max_point_y
-
-        # 극점 개수가 부족한 경우
-        elif len(max_point_x) < sample_number:
-            req_points = sample_number - len(max_point_x)
-            # print(f"Error\t\t\t: {req_points} more local max points required.")
-            debug_print(f"Error\t\t\t: {req_points} more local max points required.", print_mode)
-            # 각 구간의 양 끝점 중 오차가 큰 순서대로 삽입.
-            boundary_data = []
-            for start, end in intervals:
-                boundary_data.append((start, error_abs(coeff, start, evalF(start))))
-                boundary_data.append((end, error_abs(coeff, end, evalF(end))))
-            boundary_data.sort(key= lambda x: x[1])
-
-            added = 0
-            for x_val, err in reversed(boundary_data):
-                if added == req_points:
-                    break
-                x_np = np.float64(x_val)
-                if x_np not in max_point_x:
-                    max_point_x.append(x_np)
-                    max_point_y.append(err)
-                    added += 1
-
-            # 2개의 점으로도 부족할 경우 오류를 출력하고 더미데이터 반환.
-            if added < req_points:
-                debug_print(f"Fatal Error\t\t: {req_points-added} more points need to be added.", print_mode)
-                best_points_x = max_point_x
-                best_points_y = max_point_y
-                return err_return
-            else:
-                max_point_x.sort()
-                max_point_y.sort()
-                best_points_x = max_point_x
-                best_points_y = max_point_y
-
+        
         # 극점 개수가 너무 많은 경우
         elif len(max_point_x) > sample_number:
-            try:
-                extra_points = len(max_point_x) - sample_number
-                debug_print(f"{extra_points} more local max points exists.", print_mode)
-                # best_points_x, best_points_y  = find_best_combination_v3(max_point_x, max_point_y, extra_points, coeff, evalF)
-                best_points_x, best_points_y = find_best_combination(max_point_x, max_point_y, sample_number, coeff, evalF, print_mode)
-            except TypeError as e:
-                # print("극점 개수 오류")
-                # print(e)
+            extra_points = len(max_point_x) - sample_number
+            debug_print(f"{extra_points} more local max points exists.", print_mode)
+            # best_points_x, best_points_y = find_best_combination(max_point_x, max_point_y, sample_number, coeff, evalF, print_mode)
+            best_points_x, best_points_y = select_max_points(max_point_x, max_point_y, sample_number, coeff, evalF, print_mode, E)
+            if best_points_x == []:
+                # best_points_x, best_points_y = select_max_points(max_point_x, max_point_y, sample_number, coeff, evalF, print_mode, E)
                 return err_return
+
+        # 극점 개수가 부족한 경우 - Deprecated.
+        elif len(max_point_x) < sample_number:
+            # print("MORE POINT NEEDED")
+            return err_return
+            # req_points = sample_number - len(max_point_x)
+            # # print(f"Error\t\t\t: {req_points} more local max points required.")
+            # debug_print(f"Error\t\t\t: {req_points} more local max points required.", print_mode)
+            # # 각 구간의 양 끝점 중 오차가 큰 순서대로 삽입.
+            # boundary_data = []
+            # for start, end in intervals:
+            #     boundary_data.append((start, error_abs(coeff, start, evalF(start))))
+            #     boundary_data.append((end, error_abs(coeff, end, evalF(end))))
+            # boundary_data.sort(key= lambda x: x[1])
+
+            # added = 0
+            # for x_val, err in reversed(boundary_data):
+            #     if added == req_points:
+            #         break
+            #     x_np = np.float64(x_val)
+            #     if x_np not in max_point_x:
+            #         max_point_x.append(x_np)
+            #         max_point_y.append(err)
+            #         added += 1
+
+            # # 2개의 점으로도 부족할 경우 오류를 출력하고 더미데이터 반환.
+            # if added < req_points:
+            #     debug_print(f"Fatal Error\t\t: {req_points-added} more points need to be added.", print_mode)
+            #     best_points_x = max_point_x
+            #     best_points_y = max_point_y
+            #     return err_return
+            # else:
+            #     max_point_x.sort()
+            #     max_point_y.sort()
+            #     best_points_x = max_point_x
+            #     best_points_y = max_point_y
 
         best_error_abs = [abs(x) for x in best_points_y]
 
@@ -107,7 +118,7 @@ def remez_algorithm(n: int, intervals: list, evalF, approx_mode: str, eb: EB, er
         if decide_exit(best_error_abs, 1e-2, print_mode):
             try:
                 if clni:
-                    max_err, next_intervals = calculate_next_remez(coeff, evalF, eb, intervals, err_mode)
+                    max_err, next_intervals = calculate_next_remez(coeff, evalF, eb, intervals)
                     if next_intervals[0][1] < next_intervals[1][0]:
                         return coeff, max_err, next_intervals
                     else:
@@ -129,33 +140,3 @@ def remez_algorithm(n: int, intervals: list, evalF, approx_mode: str, eb: EB, er
     
     debug_print("Approx failed.", print_mode)
     return err_return
-
-
-def cleanse(eb: EB, intervals: list[list[float]]):
-    def evalF(x):
-        return 1 if x >= 0.5 else 0
-    
-    def evalP(x):
-        return -2 * pow(x, 3) + 3 * pow(x, 2)
-    
-    ni = []
-    max_err = 0.0
-    for start, end in intervals:
-        points = generate_points(np.float64(start), np.float64(end), np.float64(1e-8))
-        p_vals1 = np.fromiter((evalP(p) + eb.cal_bound_cleanse(p)/eb.scale for p in points), dtype=float, count=len(points))
-        p_vals2 = np.fromiter((evalP(p) - eb.cal_bound_cleanse(p)/eb.scale for p in points), dtype=float, count=len(points))
-        f_vals = np.fromiter((evalF(p) for p in points), dtype=float, count=len(points))
-        
-        err_vals = np.concatenate((np.abs(f_vals - p_vals1), np.abs(f_vals - p_vals2)))
-        vals = np.concatenate((p_vals1, p_vals2))
-        ni.append([np.min(vals), np.max(vals)])
-    
-    # 최대오차
-    max_err = max(np.max(err_vals), max_err)
-    
-    if (ni[0][1]-ni[0][0]) < (ni[1][1]-ni[1][0]):
-        ni.reverse()
-
-    return max_err, ni
-    
-            

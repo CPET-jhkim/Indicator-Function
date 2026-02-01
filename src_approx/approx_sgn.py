@@ -1,6 +1,6 @@
 from itertools import product
 import math
-from cal_depth import *
+from basic_class import *
 from src_remez.basic import evalP
 
 # Sgn functions

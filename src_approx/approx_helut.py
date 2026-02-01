@@ -1,5 +1,5 @@
 from src_remez.basic import evalP
-from cal_depth import cal_iter, CalData
+from basic_class import cal_iter, CalData
 from math import log2
 
 def sqmethod(p: int, u: float, e: float) -> tuple[int, int, tuple, CalData]:

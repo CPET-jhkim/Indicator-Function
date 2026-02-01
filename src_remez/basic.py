@@ -1,4 +1,6 @@
 import numpy as np
+import mpmath as mp
+from numpy.polynomial import Polynomial
 from math import log2
 from .print import debug_print
 from polyEval.algorithm import cal_polyEval
@@ -16,7 +18,7 @@ def error_func(coeff, x, y):
     return evalP(coeff, x) - y
 
 # 구간 [a, b]에서 chebyshev node를 사용하여 m개의 점 샘플링
-def sample_points(a, b, m) -> np.ndarray:
+def sample_points(a: np.float64, b: np.float64, m) -> np.ndarray:
     if m <= 0:
         print("Sample 0 points!!!")
         return np.ndarray([], dtype=float)
@@ -72,139 +74,6 @@ def generate_points(start: np.float64, end: np.float64, step=np.float64(1e-8)):
             return p
         step *= np.float64(10.0)
 
-# def sample_points_multi(m, intervals, print_mode) -> np.ndarray:
-#     """
-#     구간 비율에 따라 총 m개의 점을 여러 구간에 분배하여 샘플링합니다.
-#     - 각 구간마다 최소 1개 이상 샘플링하도록 설계되어 있으므로 m >= len(intervals) 이어야 합니다.
-#     - 모든 구간은 (start < end) 를 만족해야 합니다.
-#     - intervals 는 비어있을 수 없습니다.
-#     """
-#     # === 입력/전제 조건 검증 ===
-#     # m 타입/값 검증
-#     if not isinstance(m, (int, np.integer)):
-#         raise TypeError(f"'m' must be an integer, got {type(m).__name__}")
-#     if m < 0:
-#         raise ValueError(f"'m' must be >= 0, got {m}")
-
-#     # intervals 검증 (비어있음, 구조/타입, start<end)
-#     if not intervals:
-#         raise ValueError("'intervals' must not be empty.")
-
-#     try:
-#         lengths = np.array([float(end) - float(start) for start, end in intervals], dtype=float)
-#     except Exception as e:
-#         raise TypeError("'intervals' must be an iterable of (start, end) numeric pairs.") from e
-
-#     if lengths.ndim != 1 or lengths.size != len(intervals):
-#         raise ValueError("'intervals' must be a flat list of (start, end) pairs.")
-
-#     # 각 구간 길이 유효성: 반드시 양수
-#     if np.any(~np.isfinite(lengths)):
-#         raise ValueError("Interval bounds must be finite numbers.")
-#     if np.any(lengths <= 0):
-#         bad_idxs = np.where(lengths <= 0)[0].tolist()
-#         raise ValueError(f"All intervals must satisfy end > start. Invalid indices: {bad_idxs},\n intervals: {intervals}")
-
-#     # 총 길이 검증
-#     total_length = float(lengths.sum())
-#     if not np.isfinite(total_length) or total_length <= 0:
-#         raise ValueError("Sum of interval lengths must be positive.")
-
-#     n = len(intervals)
-
-#     # 분배 설계상 각 구간에 최소 1개 배정 -> m은 구간 수 이상이어야 함
-#     if m < n:
-#         raise ValueError(f"'m' must be at least the number of intervals ({n}), got {m}")
-
-#     # === 분배 계산 ===
-#     # 각 구간에 최소 1개 할당 후 남은 개수를 길이 비율로 배분
-#     m_alloc = np.ones(n, dtype=int)
-#     left = m - n  # 남은 개수 (>= 0 보장)
-
-#     # 비율 배분 (부동소수점 -> 내림)
-#     m_float = left * (lengths / total_length)  # total_length > 0 보장
-#     if not np.all(np.isfinite(m_float)):
-#         raise RuntimeError("Internal error: non-finite allocation encountered.")
-
-#     additional = np.floor(m_float).astype(int)
-#     m_alloc += additional
-
-#     # 내림으로 인해 남는 잔여 개수 재분배 (긴 구간부터)
-#     remainder = int(m - int(m_alloc.sum()))
-#     if remainder > 0:
-#         idx_desc = np.argsort(-lengths)  # 길이 내림차순 인덱스
-#         for idx in idx_desc[:remainder]:
-#             m_alloc[idx] += 1
-
-#     # === 구간별 샘플링 ===
-#     chunks = []
-#     for (s, e), num in zip(intervals, m_alloc):
-#         debug_print(f"sample {num} points in interval[{s}, {e}]", print_mode)
-#         if num > 0:
-#             # sample_points(s, e, num) 은 외부에 정의되어 있다고 가정
-#             chunks.append(sample_points(float(s), float(e), int(num)))
-
-#     # 모든 배정이 0인 경우는 위의 검증/분배상 발생하지 않지만, 방어적 처리
-#     if not chunks:
-#         return np.array([], dtype=float)
-
-#     x = np.concatenate(chunks)
-#     x.sort()
-#     return x
-
-# 구간 [a, b]에서 f(x)-p(x)의 근을 계산
-def find_intersection(coeff, evalF, a, b) -> list:
-    # num_points = int((b - a) * 10000)
-    # x_points = np.linspace(a, b, num_points)
-    x_points = generate_points(a, b)
-    p_vals = np.fromiter((evalP(coeff, x) for x in x_points), dtype=np.float64)
-    f_vals = np.fromiter((evalF(x) for x in x_points), dtype=np.float64)
-    # p_vals = np.array([evalP(coeff, x) for x in x_points])
-    # f_vals = np.array([evalF(x) for x in x_points])
-    errors = p_vals - f_vals
-    signs = np.sign(errors)
-    x_cross = []
-
-    # 4) 정확히 0인 지점
-    zero_idx = np.nonzero(errors == np.float64(0.0))[0]
-    if zero_idx.size > 0:
-        x_cross.extend(x_points[zero_idx].tolist())
-
-    # 5) 인접한 포인트 간 부호 변화 구간
-    change_idx = np.nonzero(signs[:-1] * signs[1:] < 0)[0]
-    if change_idx.size > 0:
-        x0 = x_points[change_idx]
-        x1 = x_points[change_idx + 1]
-        e0 = errors[change_idx]
-        e1 = errors[change_idx + 1]
-
-        denom = e1 - e0
-        # 분모가 0인 경우 대비
-        mask = denom != np.float64(0.0)
-
-        # 선형보간 근
-        x_root_lin = x0 - e0 * (x1 - x0) / denom
-        # 분모 0이면 중간값 사용
-        x_root_mid = (x0 + x1) / np.float64(2.0)
-
-        x_roots = np.where(mask, x_root_lin, x_root_mid)
-        x_cross.extend(x_roots.tolist())
-
-    return x_cross
-    # for i in range(len(x_points) - 1):
-    #     if errors[i] == 0: # 정확히 0
-    #         x_cross.append(x_points[i])
-    #     elif signs[i] * signs[i + 1] < 0:
-    #         x0, x1 = x_points[i], x_points[i + 1]
-    #         err0, err1 = errors[i], errors[i + 1]
-
-    #         if err1 - err0 != 0:
-    #             x_root = x0 - err0 * (x1 - x0) / (err1 - err0)
-    #         else:
-    #             x_root = (x0 + x1) / 2
-    #         x_cross.append(x_root)
-    # return x_cross
-
 # 구간 변경
 def slice_interval(approx_mode: str, intervals: list) -> list:
     if approx_mode == "all":
@@ -240,15 +109,15 @@ def create_matrix(powers: list, x: np.ndarray, evalF) -> tuple[np.ndarray, np.nd
     y_matrix = np.array(y_matrix, dtype=np.float64)
     return A_matrix, y_matrix
 
-
 # 행렬식 계산 및 계수벡터 연산
 def solve_matrix(A: np.ndarray, y: np.ndarray, n: int, powers: list) -> tuple[list, float]:
-    try:
-        B = np.linalg.solve(A, y)
-    except np.linalg.LinAlgError:
-        print("singular matrix error!")
-        # print(f"A:\n{A}")
-        return [-1], -1
+    # try:
+    B = np.linalg.solve(A, y)
+    # except np.linalg.LinAlgError:
+    #     # print("singular matrix error!")
+    #     # print(f"A:\n{A}")
+    #     # return solve_matrix_fallback_svd(A, y, n, powers)
+    #     raise
     E = B[-1]
     coeff = []
     for k in range(n + 1):
@@ -258,38 +127,340 @@ def solve_matrix(A: np.ndarray, y: np.ndarray, n: int, powers: list) -> tuple[li
         else:
             coeff.append(0.0)
     return coeff, E
+    
+# def solve_matrix(
+#     A: np.ndarray,
+#     y: np.ndarray,
+#     n: int,
+#     powers: list,
+#     dps: int = 80,          # 원하는 소수 자릿수(정밀도)
+#     use_str: bool = True    # float->mpf 변환 시 str 사용(이진부동소수 오염 완화)
+# ) -> tuple[list[np.float64], np.float64]:
+#     mp.mp.dps = dps
+
+#     def to_mpf(v):
+#         return mp.mpf(str(v)) if use_str else mp.mpf(v)
+
+#     # numpy -> mpmath matrix
+#     A_mp = mp.matrix([[to_mpf(A[i, j]) for j in range(A.shape[1])]
+#                       for i in range(A.shape[0])])
+
+#     y_arr = np.asarray(y).reshape(-1)
+#     y_mp = mp.matrix([to_mpf(v) for v in y_arr])
+
+#     try:
+#         B_mp = mp.lu_solve(A_mp, y_mp)
+#     except ZeroDivisionError:
+#         print("singular matrix error!")
+#         print(f"A:\n{A}")
+#         return [-1.0], np.float64(-1.0)
+
+#     B_list = [B_mp[i] for i in range(B_mp.rows)]
+#     E = np.float64(B_list[-1])
+
+#     coeff = []
+#     idx = 0
+#     for k in range(n + 1):
+#         if k in powers:
+#             coeff.append(np.float64(B_list[idx]))
+#             idx += 1
+#         else:
+#             coeff.append(np.float64(0.0))
+
+#     return coeff, E
+
+# def solve_matrix_fallback_svd(
+#     A: np.ndarray,
+#     y: np.ndarray,
+#     n: int,
+#     powers: list,
+#     dps: int = 200,
+#     use_str: bool = True,
+#     rcond: float | None = None,     # None이면 자동(정밀도 기반) / 예: 1e-80 같이 직접 지정 가능
+#     col_scale: bool = True,         # 열 스케일링(권장)
+#     return_float64: bool = True     # 기존과 동일하게 float64 반환
+# ) -> tuple[list, float]:
+#     """
+#     numpy.linalg.solve에서 예외 발생 시 except 블록에서 호출하는 SVD 기반 폴백.
+#     - 열 스케일링 + SVD 의사역행렬(pinv)로 해를 구함.
+#     - 반환 형식: (coeff: list[float], E: float)  기존과 동일.
+#     - 실패 시: [-1], -1
+#     """
+#     mp.mp.dps = dps
+
+#     def to_mpf(v):
+#         return mp.mpf(str(v)) if use_str else mp.mpf(v)
+
+#     A = np.asarray(A)
+#     y_arr = np.asarray(y).reshape(-1)
+
+#     # mp matrix 변환
+#     m, ncols = A.shape
+#     A_mp = mp.matrix([[to_mpf(A[i, j]) for j in range(ncols)] for i in range(m)])
+#     y_mp = mp.matrix([to_mpf(v) for v in y_arr])
+
+#     # 열 스케일링: A_scaled[:,j] = A[:,j] / s_j  (s_j = max|col|)
+#     # x_j = x_scaled_j / s_j
+#     if col_scale:
+#         s = []
+#         for j in range(ncols):
+#             mx = mp.mpf("0")
+#             for i in range(m):
+#                 v = abs(A_mp[i, j])
+#                 if v > mx:
+#                     mx = v
+#             if mx == 0:
+#                 mx = mp.mpf("1")
+#             s.append(mx)
+
+#         A_s = mp.matrix(m, ncols)
+#         for i in range(m):
+#             for j in range(ncols):
+#                 A_s[i, j] = A_mp[i, j] / s[j]
+#     else:
+#         s = [mp.mpf("1") for _ in range(ncols)]
+#         A_s = A_mp
+
+#     # SVD 기반 pinv(A_s) * y
+#     try:
+#         U, S, V = mp.svd(A_s)  # A = U*diag(S)*V^T
+#     except Exception:
+#         print("singular matrix error!")
+#         print(f"A:\n{A}")
+#         return [-1], -1
+
+#     # tolerance 설정
+#     smax = mp.mpf("0")
+#     for sv in S:
+#         if sv > smax:
+#             smax = sv
+
+#     if smax == 0:
+#         print("singular matrix error!")
+#         print(f"A:\n{A}")
+#         return [-1], -1
+
+#     if rcond is None:
+#         # 정밀도 기반 자동 컷오프(경험적): max(m,n)*eps 정도
+#         tol = smax * mp.mpf(max(m, ncols)) * mp.eps * mp.mpf("10")
+#     else:
+#         tol = smax * mp.mpf(str(rcond))
+
+#     # x_scaled = V * diag(1/S_i) * U^T * y (단, S_i > tol)
+#     # 먼저 w = U^T * y
+#     w = mp.matrix(len(S), 1)
+#     for i in range(len(S)):
+#         acc = mp.mpf("0")
+#         for k in range(m):
+#             acc += U[k, i] * y_mp[k]
+#         w[i] = acc
+
+#     # w2 = diag(1/S_i) * w
+#     w2 = mp.matrix(len(S), 1)
+#     for i, sv in enumerate(S):
+#         if sv > tol:
+#             w2[i] = w[i] / sv
+#         else:
+#             w2[i] = mp.mpf("0")
+
+#     # x_scaled = V * w2
+#     x_scaled = mp.matrix(ncols, 1)
+#     for i in range(ncols):
+#         acc = mp.mpf("0")
+#         for k in range(len(S)):
+#             acc += V[i, k] * w2[k]
+#         x_scaled[i] = acc
+
+#     # 언스케일: x_j = x_scaled_j / s_j
+#     x = mp.matrix(ncols, 1)
+#     for j in range(ncols):
+#         x[j] = x_scaled[j] / s[j]
+
+#     # 기존 반환 포맷으로 변환
+#     B_list = [x[i] for i in range(ncols)]
+#     E_val = B_list[-1]
+
+#     coeff = []
+#     idx = 0
+#     powers_set = set(powers)
+#     for k in range(n + 1):
+#         if k in powers_set:
+#             coeff.append(B_list[idx])
+#             idx += 1
+#         else:
+#             coeff.append(mp.mpf("0"))
+
+#     if return_float64:
+#         coeff = [np.float64(c) for c in coeff]
+#         E_out = np.float64(E_val)
+#     else:
+#         E_out = E_val
+
+#     return coeff, E_out
 
 # 지역 극점의 x좌표 계산
 def calculate_local_max(coeff, evalF, intervals: list) -> tuple:
-    cross_interval = [] # (start, end) tuple로 구성된 list
+    poly = Polynomial(coeff)  # 다항식 객체 생성
+    deriv_roots = poly.deriv().roots() # 도함수의 근 계산
+    real_roots = deriv_roots[np.isreal(deriv_roots)].real # 실근만 추리기
+    
     max_point_x = []
     max_point_y = []
     
-    # 근을 기준으로 새로운 구간을 정의
+    # 각 구간에 속하는 점만 선별
     for start, end in intervals:
-        roots = find_intersection(coeff, evalF, start, end)
-        if len(roots) == 0:
-            cross_interval.append((np.float64(start), np.float64(end)))
-        else:
-            if start not in roots:
-                roots.insert(0, start)
-            if end not in roots:
-                roots.append(end)
-            for i in range(len(roots)-1):
-                cross_interval.append((roots[i], roots[i+1]))
+        valid_roots = real_roots[(real_roots > start) & (real_roots < end)]
+        
+        # 구간 시작/끝점, 구간 내 극점들
+        candidates = np.unique(np.concatenate(([start, end], valid_roots)))
+        
+        f_vals = np.array([evalF(x) for x in candidates])
+        p_vals = poly(candidates)
+        errors = p_vals - f_vals
+        
+        # 극점 모두 추가
+        max_point_x.extend(candidates)
+        max_point_y.extend(errors)
 
-    for start, end in cross_interval:
-        # local_x = np.linspace(start, end, 1000)
-        local_x = generate_points(start, end)
-        local_y = [error_abs(coeff, x, evalF(x)) for x in local_x]
-        max_index = np.argmax(local_y)
-        max_x = local_x[max_index]
-        max_y = local_y[max_index]
-        max_point_x.append(max_x)
-        max_point_y.append(max_y)
-    
     return max_point_x, max_point_y
 
+# mu(x) 계산
+def eval_mu(coeff, x: float, eps: float = 0.0) -> int:
+        poly = Polynomial(coeff)
+        r2 = poly.deriv(2)(x)  # p''(x)
+        if r2 < -eps:
+            return 1
+        if r2 > eps:
+            return -1
+        return 0 
+    
+# 논문에서 제시한 극점 선별 알고리즘 구현(Algorithm 3)
+def select_max_points(max_point_x: list, max_point_y: list, sample_number: int, coeff: list, evalF, print_mode: str = "normal", E: float | None = None):
+    errs = []
+    for x, y in zip(max_point_x, max_point_y):
+        err = evalP(coeff, x) - evalF(x)
+        sgn = 1 if err > 0 else -1
+        errs.append((sgn, err, x))
+    
+    # Step1 - Alternating conditon.
+    # 동일한 부호가 발생하는 경우 최대오차만 남기고 제거.
+    res_step1 = [errs[0]]
+    for i, err_data in enumerate(errs):
+        if i == 0:
+            continue
+        
+        compare_data = res_step1[-1]
+        if compare_data[0] != err_data[0]:
+            res_step1.append(err_data)
+        else:
+            if abs(compare_data[1]) < abs(err_data[1]):
+                res_step1[-1] = err_data
+        
+    if len(res_step1) < sample_number:
+        return [], []  
+    
+    # Step2 - Maximizing summation of errors
+    res_step2 = [(d[0], abs(d[1]), d[2]) for d in res_step1]
+    err_sum_neigh = []
+    for i in range(0, len(res_step2)-1):
+        err_sum_neigh.append((i, res_step2[i][1] + res_step2[i+1][1]))
+    err_sum_neigh.sort(key=lambda t: t[1])
+    
+    while len(res_step2) > sample_number:
+        if len(res_step2) == sample_number + 1:
+            rm_index = 0 if res_step2[0][1] < res_step2[-1][1] else -1
+            del res_step2[rm_index]
+        
+        elif len(res_step2) >= sample_number + 2:
+            err_sum_neigh.append((-1, res_step2[0][1] + res_step2[-1][1]))
+            err_sum_neigh.sort(key=lambda t: t[1])
+            rm_index = err_sum_neigh[0][0]
+            del res_step2[rm_index+1]
+            del res_step2[rm_index]
+    
+    mpx = [data[2] for data in res_step2]
+    mpy = [data[0] * data[1] for data in res_step2]
+    return mpx, mpy
+
+'''# 논문에서 제시한 극점 선별 알고리즘 구현(Algorithm 3)
+def select_max_points(max_point_x: list, max_point_y: list, sample_number: int, coeff: list, evalF, print_mode: str = "normal", E: float | None = None):
+    errs = []
+    for x, y in zip(max_point_x, max_point_y):
+        err = evalP(coeff, x) - evalF(x)
+        sgn = 1 if err > 0 else -1
+        errs.append((sgn, err, x))
+    
+    # 후보 데이터 B 연산
+    B = []
+    for x in max_point_x:
+        r = evalP(coeff, x) - evalF(x)
+        mu = eval_mu(coeff, x)
+        if mu != 0:
+            B.append([x, r, mu])
+    if len(B) < sample_number:
+        return [], []
+    
+    # Step1 - Alternating conditon.
+    # 동일한 부호가 발생하는 경우 최대오차만 남기고 제거.
+    res = [B[0]]
+    for t in B[1:]:
+        prev = res[-1]
+        if prev[2] * t[2] == -1:
+            res.append(t)
+        else:
+            if abs(t[1]) > abs(prev[1]):
+                res[-1] = t
+
+    if len(res) < sample_number:
+        return [], []
+    
+    # Step2 - Maximizing summation of errors
+    while len(res) > sample_number:
+        L = len(res)
+        
+        if L == sample_number + 1:
+            if abs(res[0][1]) <= abs(res[-1][1]):
+                del res[0]
+            else:
+                del res[-1]
+            continue
+        
+        if L == sample_number + 2:
+            pair_sums = []
+            for i in range(L - 1):
+                pair_sums.append((abs(res[i][1]) + abs(res[i + 1][1]), i, i + 1))
+            pair_sums.append((abs(res[0][1]) + abs(res[-1][1]), 0, L - 1))  # wrap
+            pair_sums.sort(key=lambda t: t[0])
+
+            _, i, j = pair_sums[0]
+            if i == 0 and j == L - 1:
+                del res[-1]
+                del res[0]
+            else:
+                if j > i:
+                    del res[j]
+                    del res[i]
+                else:
+                    del res[i]
+                    del res[j]
+            continue
+        
+        pair_sums = [(abs(res[i][1]) + abs(res[i + 1][1]), i) for i in range(L - 1)]
+        pair_sums.sort(key=lambda t: t[0])
+        _, i = pair_sums[0]  # 최소 pair는 (i, i+1)
+
+        if i == 0:
+            del res[0]          # t1 포함 -> t1 제거
+        elif i == L - 2:
+            del res[-1]         # tL 포함 -> tL 제거
+        else:
+            del res[i + 1]      # 내부 pair -> 둘 다 제거
+            del res[i]
+
+    mpx = [t[0] for t in res]
+    mpy = [t[1] for t in res]
+    return mpx, mpy
+'''        
 # 종료조건 판단
 def decide_exit(errors: list, threshold: float, print_mode: str) -> bool:
     max_err, min_err = max(errors), min(errors)
@@ -306,45 +477,48 @@ def decide_exit(errors: list, threshold: float, print_mode: str) -> bool:
         return False
 
 # remez 다음을 위한 interval, max_err 계산
-# mode1 : errbound계산에 B_clean 고려
-# mode2 : errbound계산에 B_scale만 고려
-def calculate_next_remez(coeff, evalF, eb, intervals, err_mode: int=2):
+def calculate_next_remez(coeff, evalF, eb: ErrBound, intervals):
     try:
-        ni = []
+        next_interval = []
         max_err = 0
-
+        
+        poly = Polynomial(coeff)
         dcmp = cal_polyEval(coeff)
-        eb2 = ErrBound(eb.sigma, eb.N, eb.h, eb.s)
         def calbound(x):
             try:
-                bound = cal_bound(eb2, x, dcmp)
-                return float(bound/eb2.scale)
+                bound = cal_bound(eb, x, dcmp)
+                return float(bound/eb.scale)
             except Exception as e:
-                print(f"x: {x}, bound: {bound}, scale: {eb2.scale}")
-                return 0
-            
+                print(f"x: {x}, bound: {bound}, scale: {eb.scale}")
+                return 0.0
+        vec_calbound = np.vectorize(calbound, otypes=[float])
+        vec_evalF = np.vectorize(evalF, otypes=[float])
+        
         for start, end in intervals:
             if start == end:
                 points = np.array([start])
             else:
                 points = generate_points(start, end)
-                
-            p_vals1      = np.fromiter((evalP(coeff, p) + calbound(p) for p in points), dtype=float, count=points.size)
-            p_vals2      = np.fromiter((evalP(coeff, p) - calbound(p) for p in points), dtype=float, count=points.size)
-            f_vals      = np.fromiter((evalF(p) for p in points), dtype=float, count=points.size)
+            
+            errors = vec_calbound(points)
+            p_vals = poly(points)
+            f_vals = vec_evalF(points)
+            
+            p_vals1 = p_vals + errors
+            p_vals2 = p_vals - errors          
 
             err_vals = np.concatenate((np.abs(f_vals - p_vals1), np.abs(f_vals - p_vals2)))
             vals = np.concatenate((p_vals1, p_vals2))
-            ni.append([np.min(vals), np.max(vals)])
+            next_interval.append([np.min(vals), np.max(vals)])
             
             # 최대오차
             max_err = max(np.max(err_vals), max_err)
         
         # 정렬 - 구간이 긴 쪽이 다음 근사에서 0으로 수렴해야함
-        if (ni[0][1]-ni[0][0]) < (ni[1][1]-ni[1][0]):
-            ni.reverse()
+        if (next_interval[0][1]-next_interval[0][0]) < (next_interval[1][1]-next_interval[1][0]):
+            next_interval.reverse()
 
-        return max_err, ni
+        return max_err, next_interval
     except Exception as e:
         print(e)
         return -99, [[0, 1], [1, 0]]
